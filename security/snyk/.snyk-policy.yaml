@@ -1,0 +1,71 @@
+# =============================================================================
+# .snyk-policy.yaml — Snyk ignore policy
+# Documents accepted risks and false positives for this project.
+#
+# Format:  https://docs.snyk.io/snyk-cli/test-for-vulnerabilities/the-.snyk-file
+# =============================================================================
+
+version: v1.25.0
+
+# ─── Language settings ────────────────────────────────────────────────────────
+language-settings:
+  python:
+    # Use pip as dependency manager; requirements.txt is in app/
+    version: "3.11"
+
+# ─── Patch policies ──────────────────────────────────────────────────────────
+patch: {}
+
+# ─── Ignore policies ─────────────────────────────────────────────────────────
+# Each entry documents WHY a vulnerability is ignored, who approved it,
+# and when the ignore expires (mandatory for audit purposes).
+ignore:
+
+  # ── Example: Development-only dependency, not reachable in production ──────
+  # SNYK-PYTHON-WERKZEUG-6035177:
+  #   - '* > werkzeug':
+  #       reason: >
+  #         Werkzeug debugger vulnerability. Only affects DEBUG mode which is
+  #         explicitly disabled in production via FLASK_ENV=production.
+  #         The /metrics and /health endpoints do not use the debugger.
+  #       expires: '2026-09-01T00:00:00.000Z'
+  #       created: '2026-03-01T00:00:00.000Z'
+  #       ignoredBy:
+  #         id: security-team
+  #         name: Security Team
+  #         email: security@example.com
+
+  # ── Example: Accepted risk — no fix available, mitigated by WAF ──────────
+  # SNYK-PYTHON-REQUESTS-6287594:
+  #   - '* > requests':
+  #       reason: >
+  #         Requests SSRF vulnerability. Mitigated at network level by
+  #         outbound egress restrictions in security group sg-0abc123 and
+  #         OPA NetworkPolicy enforcement. No fix available upstream.
+  #         Risk accepted by CISO on 2026-02-15.
+  #       expires: '2026-08-01T00:00:00.000Z'
+  #       created: '2026-02-15T00:00:00.000Z'
+  #       ignoredBy:
+  #         id: ciso
+  #         name: CISO
+  #         email: ciso@example.com
+
+# ─── Exclude paths from scanning ─────────────────────────────────────────────
+exclude:
+  global:
+    # Exclude test fixtures and documentation from SCA analysis
+    - "app/tests/**"
+    - "ml-risk/tests/**"
+    - "**/__pycache__/**"
+    - "**/*.pyc"
+    - "**/node_modules/**"
+    - "docs/**"
+
+# ─── Severity thresholds (enforced in Jenkinsfile via --severity-threshold) ──
+# These are informational; actual thresholds are set in the pipeline:
+#   snyk test --severity-threshold=high
+# Effective policy:
+#   critical → BLOCK pipeline immediately
+#   high     → BLOCK pipeline immediately
+#   medium   → WARN only (report to Slack)
+#   low      → LOG only (included in SBOM attestation)

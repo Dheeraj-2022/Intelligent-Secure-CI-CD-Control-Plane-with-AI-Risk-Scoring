@@ -1,0 +1,42 @@
+# =============================================================================
+# terraform.tfvars.example
+# Copy to terraform.tfvars and fill in your values before running terraform.
+# =============================================================================
+
+# ─── AWS ──────────────────────────────────────────────────────────────────────
+aws_region = "us-west-2"
+environment = "dev"
+
+# ─── EKS ──────────────────────────────────────────────────────────────────────
+cluster_name = "cicd-control-plane"
+eks_version  = "1.28"
+
+# ─── Networking ───────────────────────────────────────────────────────────────
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["us-west-2a", "us-west-2b", "us-west-2c"]
+
+# ─── Node Groups ──────────────────────────────────────────────────────────────
+node_groups = {
+  general = {
+    instance_types = ["t3.large"]
+    min_size       = 2
+    max_size       = 5
+    desired_size   = 3
+    disk_size      = 50
+    capacity_type  = "ON_DEMAND"
+  }
+  spot = {
+    instance_types = ["t3.large", "t3a.large"]
+    min_size       = 0
+    max_size       = 10
+    desired_size   = 2
+    disk_size      = 50
+    capacity_type  = "SPOT"
+  }
+}
+
+# ─── ECR Repositories ─────────────────────────────────────────────────────────
+ecr_repositories = [
+  "sample-app",
+  "jenkins-agent"
+]

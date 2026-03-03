@@ -1,0 +1,50 @@
+# =============================================================================
+# Kustomize overlay — dev
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dev
+
+commonLabels:
+  environment: dev
+
+namePrefix: dev-
+
+# Patch: scale down to 1 replica in dev
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: ".*"
+
+  # Patch: set resource requests/limits for dev
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "250m"
+            memory: "256Mi"
+    target:
+      kind: Deployment
+      name: ".*"
+
+images:
+  - name: sample-app
+    newTag: latest
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - ENVIRONMENT=dev
+      - LOG_LEVEL=DEBUG
+
+resources:
+  - namespace.yaml

@@ -1,0 +1,229 @@
+# =============================================================================
+# Jenkins Helm Values — Intelligent Secure CI/CD Control Plane
+# Chart: jenkins/jenkins  (https://charts.jenkins.io)
+# =============================================================================
+
+controller:
+  # ── Image ─────────────────────────────────────────────────────────────────
+  image: "jenkins/jenkins"
+  tag: "2.440.1-lts-jdk17"
+  imagePullPolicy: "IfNotPresent"
+
+  # ── Resources ──────────────────────────────────────────────────────────────
+  resources:
+    requests:
+      cpu:    "1000m"
+      memory: "2Gi"
+    limits:
+      cpu:    "2000m"
+      memory: "4Gi"
+
+  # ── Java options ────────────────────────────────────────────────────────────
+  javaOpts: >-
+    -Xms1g
+    -Xmx3g
+    -XX:+UseG1GC
+    -Djenkins.install.runSetupWizard=false
+    -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.USE_BINARY_WRAPPER=true
+
+  # ── Admin credentials (override via sealed secret in production) ────────────
+  adminUser: "admin"
+  # adminPassword is read from the jenkins secret; set externally.
+
+  # ── Service type ────────────────────────────────────────────────────────────
+  serviceType: ClusterIP
+  servicePort: 8080
+
+  # ── Ingress ─────────────────────────────────────────────────────────────────
+  ingress:
+    enabled: true
+    ingressClassName: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hostName: "jenkins.example.com"
+    tls:
+      - secretName: jenkins-tls
+        hosts:
+          - jenkins.example.com
+
+  # ── Prometheus metrics ───────────────────────────────────────────────────────
+  prometheus:
+    enabled: true
+    serviceMonitorAdditionalLabels:
+      release: prometheus
+
+  # ── Plugins ──────────────────────────────────────────────────────────────────
+  installPlugins:
+    - kubernetes:4203.v1dd44f5b_1cf9
+    - workflow-aggregator:596.v8c21c963d92d
+    - git:5.2.1
+    - configuration-as-code:1775.v810dc950b_514
+    - job-dsl:1.87
+    - blueocean:1.27.11
+    - credentials-binding:657.v2b_19db_7d6e6d
+    - pipeline-utility-steps:2.16.2
+    - sonar:2.17.2
+    - snyk-security-scanner:3.1.0
+    - aws-credentials:231.v09e6c1eda_d4e
+    - amazon-ecr:1.116.vc4654d476c1b
+    - prometheus:2.4.1
+    - junit:1232.v5a_4144e6b_d7c
+    - cobertura:1.17
+    - slack:693.v4b_c79c4db_a_4d
+    - rebuild:1.34
+    - timestamper:1.26
+    - ansicolor:1.0.4
+    - pipeline-stage-view:2.33
+
+  # ── Configuration as Code ────────────────────────────────────────────────────
+  JCasC:
+    defaultConfig: true
+    configScripts:
+      credentials: |
+        credentials:
+          system:
+            domainCredentials:
+              - credentials:
+                  - aws:
+                      scope: GLOBAL
+                      id: "aws-credentials"
+                      description: "AWS Credentials for ECR/EKS"
+                      accessKeyId: "${AWS_ACCESS_KEY_ID}"
+                      secretAccessKey: "${AWS_SECRET_ACCESS_KEY}"
+                  - string:
+                      scope: GLOBAL
+                      id: "snyk-api-token"
+                      description: "Snyk API Token"
+                      secret: "${SNYK_TOKEN}"
+                  - usernamePassword:
+                      scope: GLOBAL
+                      id: "github-token"
+                      description: "GitHub PAT for GitOps repo"
+                      username: "jenkins-bot"
+                      password: "${GITHUB_TOKEN}"
+                  - string:
+                      scope: GLOBAL
+                      id: "sonarqube-token"
+                      description: "SonarQube analysis token"
+                      secret: "${SONAR_TOKEN}"
+                  - string:
+                      scope: GLOBAL
+                      id: "argocd-password"
+                      description: "ArgoCD admin password"
+                      secret: "${ARGOCD_PASSWORD}"
+                  - string:
+                      scope: GLOBAL
+                      id: "slack-webhook"
+                      description: "Slack Webhook URL"
+                      secret: "${SLACK_WEBHOOK_URL}"
+
+      sonarqube: |
+        unclassified:
+          sonarGlobalConfiguration:
+            buildWrapperEnabled: true
+            installations:
+              - name: "SonarQube"
+                serverUrl: "http://sonarqube.sonarqube.svc.cluster.local:9000"
+                credentialsId: "sonarqube-token"
+
+      global-env: |
+        jenkins:
+          globalNodeProperties:
+            - envVars:
+                env:
+                  - key: "AWS_REGION"
+                    value: "us-west-2"
+                  - key: "AWS_ACCOUNT_ID"
+                    value: "${AWS_ACCOUNT_ID}"
+                  - key: "SONARQUBE_URL"
+                    value: "http://sonarqube.sonarqube.svc.cluster.local:9000"
+                  - key: "ARGOCD_SERVER"
+                    value: "argocd-server.argocd.svc.cluster.local"
+                  - key: "GITOPS_REPO_URL"
+                    value: "https://github.com/org/gitops-repo.git"
+
+      pipeline-library: |
+        unclassified:
+          globalLibraries:
+            libraries:
+              - name: "shared-library"
+                retriever:
+                  modernSCM:
+                    scm:
+                      git:
+                        remote: "https://github.com/org/jenkins-shared-library.git"
+                        credentialsId: "github-token"
+                defaultVersion: "main"
+                implicit: true
+
+  # ── Service Account (IRSA) ──────────────────────────────────────────────────
+  serviceAccount:
+    create: true
+    name: "jenkins"
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::${AWS_ACCOUNT_ID}:role/jenkins-irsa-role"
+
+  # ── Security context ─────────────────────────────────────────────────────────
+  podSecurityContextOverride:
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Agent (Kubernetes pod template defaults)
+# ─────────────────────────────────────────────────────────────────────────────
+agent:
+  enabled: true
+  namespace: "jenkins"
+  image: "jenkins/inbound-agent"
+  tag:   "3256.v88a_f6e922152-5"
+  workingDir: "/home/jenkins/agent"
+
+  resources:
+    requests:
+      cpu:    "500m"
+      memory: "512Mi"
+    limits:
+      cpu:    "1000m"
+      memory: "1Gi"
+
+  podTemplates:
+    python: |
+      - name: python
+        label: python-agent
+        serviceAccount: jenkins
+        containers:
+          - name: python
+            image: python:3.11-slim
+            command: "cat"
+            ttyEnabled: true
+            resourceRequestCpu: "500m"
+            resourceRequestMemory: "512Mi"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Persistence
+# ─────────────────────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  storageClass: "gp3"
+  size: "50Gi"
+  accessMode: "ReadWriteOnce"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RBAC
+# ─────────────────────────────────────────────────────────────────────────────
+rbac:
+  create: true
+  readSecrets: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Network Policy
+# ─────────────────────────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+  internalAgents:
+    allowed: true
+    namespaceLabels:
+      jenkins-agents: "true"

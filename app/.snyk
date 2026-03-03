@@ -1,0 +1,15 @@
+# Snyk policy file
+version: v1.22.0
+
+# Ignore specific vulnerabilities (with justification)
+ignore: {}
+
+# Patch settings
+patch: {}
+
+# Fail on severity
+failOn: high
+
+# Language settings
+language-settings:
+  python: '3.11'

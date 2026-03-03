@@ -1,0 +1,140 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ML Risk Scoring Model Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+model:
+  name: "cicd-risk-scorer"
+  version: "1.0.0"
+  description: >
+    Gradient Boosting classifier with Platt-scaled probability calibration.
+    Predicts the probability that a CI/CD pipeline run will fail, based on
+    build context features extracted at pipeline run time.
+
+  # Serialised artefact paths (relative to ml-risk/)
+  artifact_path: "models/risk_model.pkl"
+  metadata_path: "models/model_metadata.json"
+  calibration_report_path: "models/calibration_report.json"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Training
+# ─────────────────────────────────────────────────────────────────────────────
+training:
+  data_path: "data/synthetic_dataset.csv"
+  test_size: 0.20
+  random_state: 42
+  stratify: true
+
+  # GradientBoostingClassifier hyperparameters
+  gradient_boosting:
+    n_estimators: 100
+    learning_rate: 0.10
+    max_depth: 5
+    min_samples_split: 10
+    min_samples_leaf: 5
+    subsample: 0.80
+    max_features: "sqrt"
+    random_state: 42
+
+  # Probability calibration wrapper
+  calibration:
+    method: "sigmoid"   # "sigmoid" (Platt) or "isotonic"
+    cv: 5               # cross-val folds used during calibration
+
+  # Cross-validation for evaluation only
+  cross_validation:
+    folds: 5
+    scoring: "roc_auc"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature Definitions
+# ─────────────────────────────────────────────────────────────────────────────
+features:
+  names:
+    - changed_files
+    - commit_message_length
+    - hour_of_day
+    - day_of_week
+    - code_coverage
+    - critical_vulns
+    - test_count
+    - build_history_failures
+    - file_types_changed
+    - author_experience
+
+  # Business-level descriptions (used in UI and reports)
+  descriptions:
+    changed_files:           "Number of files modified in this commit"
+    commit_message_length:   "Character length of the commit message (quality proxy)"
+    hour_of_day:             "Hour of day the build was triggered (0–23)"
+    day_of_week:             "Day of week (0=Monday … 6=Sunday)"
+    code_coverage:           "Unit test code coverage percentage (0–100)"
+    critical_vulns:          "Number of critical CVEs found by Snyk"
+    test_count:              "Total number of unit tests in the test suite"
+    build_history_failures:  "Recent pipeline failure rate (0.0–1.0)"
+    file_types_changed:      "Number of distinct file extensions in changeset"
+    author_experience:       "Number of commits by this author in the last 30 days"
+
+  # Default fallback values when a feature cannot be extracted
+  defaults:
+    changed_files: 5
+    commit_message_length: 30
+    hour_of_day: 12
+    day_of_week: 1
+    code_coverage: 80.0
+    critical_vulns: 0
+    test_count: 50
+    build_history_failures: 0.10
+    file_types_changed: 2
+    author_experience: 20
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Risk Thresholds
+# ─────────────────────────────────────────────────────────────────────────────
+risk_thresholds:
+  # Probability boundaries that map score → level
+  low:
+    max: 0.30
+    label: "LOW"
+    emoji: "🟢"
+    action: "auto_deploy"
+    description: "All metrics within acceptable bounds — proceed automatically."
+
+  medium:
+    min: 0.30
+    max: 0.70
+    label: "MEDIUM"
+    emoji: "🟡"
+    action: "deploy_with_warning"
+    description: "Elevated risk detected — monitor deployment closely."
+
+  high:
+    min: 0.70
+    label: "HIGH"
+    emoji: "🔴"
+    action: "require_human_approval"
+    description: "High predicted failure probability — manual review required."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Gate Integration
+# ─────────────────────────────────────────────────────────────────────────────
+security_gates:
+  # These thresholds mirror the Jenkinsfile environment block
+  min_code_coverage: 80.0        # percent
+  max_critical_vulns: 0          # absolute count
+  max_risk_score: 0.70           # probability
+
+  # If risk_score >= block_threshold, pipeline is hard-blocked (no manual override)
+  block_threshold: 0.95
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inference / Serving
+# ─────────────────────────────────────────────────────────────────────────────
+inference:
+  # Rounding precision for reported risk_score
+  score_decimal_places: 3
+
+  # Top-N contributing features to surface in the report
+  top_features_count: 3
+
+  # Minimum training data recency before a stale-model warning is emitted
+  model_max_age_days: 90

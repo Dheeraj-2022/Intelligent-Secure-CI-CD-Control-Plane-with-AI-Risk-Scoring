@@ -1,0 +1,416 @@
+@Library('shared-library') _
+
+pipeline {
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: agent
+spec:
+  serviceAccountName: jenkins
+  containers:
+  - name: docker
+    image: docker:24-dind
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: docker-sock
+      mountPath: /var/run
+  - name: python
+    image: python:3.11-slim
+    command:
+    - cat
+    tty: true
+  - name: kubectl
+    image: bitnami/kubectl:1.28
+    command:
+    - cat
+    tty: true
+  - name: sonar-scanner
+    image: sonarsource/sonar-scanner-cli:5.0
+    command:
+    - cat
+    tty: true
+  - name: snyk
+    image: snyk/snyk:python-3.11
+    command:
+    - cat
+    tty: true
+  volumes:
+  - name: docker-sock
+    emptyDir: {}
+"""
+        }
+    }
+    
+    environment {
+        APP_NAME = 'sample-app'
+        ECR_REGISTRY = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
+        IMAGE_TAG = "${env.GIT_COMMIT.take(8)}"
+        SONAR_HOST = "${env.SONARQUBE_URL}"
+        SNYK_TOKEN = credentials('snyk-api-token')
+        RISK_THRESHOLD = '0.7'
+        COVERAGE_THRESHOLD = '80'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_MSG = sh(
+                        script: 'git log -1 --pretty=%B',
+                        returnStdout: true
+                    ).trim()
+                    env.CHANGED_FILES = sh(
+                        script: 'git diff --name-only HEAD~1 HEAD | wc -l',
+                        returnStdout: true
+                    ).trim()
+                }
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                container('python') {
+                    dir('app') {
+                        sh '''
+                            pip install --user -r requirements.txt
+                            pip install --user pytest pytest-cov
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Unit Tests') {
+            steps {
+                container('python') {
+                    dir('app') {
+                        sh '''
+                            python -m pytest tests/ \
+                                --cov=src \
+                                --cov-report=xml:coverage.xml \
+                                --cov-report=term \
+                                --junitxml=test-results.xml
+                        '''
+                    }
+                }
+            }
+            post {
+                always {
+                    junit 'app/test-results.xml'
+                }
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                container('sonar-scanner') {
+                    withSonarQubeEnv('SonarQube') {
+                        dir('app') {
+                            sh '''
+                                sonar-scanner \
+                                    -Dsonar.projectKey=${APP_NAME} \
+                                    -Dsonar.sources=src \
+                                    -Dsonar.tests=tests \
+                                    -Dsonar.python.coverage.reportPaths=coverage.xml \
+                                    -Dsonar.host.url=${SONAR_HOST}
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+                script {
+                    def qg = waitForQualityGate()
+                    if (qg.status != 'OK') {
+                        error "Quality Gate failed: ${qg.status}"
+                    }
+                    
+                    // Extract coverage metric
+                    def coverage = sh(
+                        script: """
+                            curl -u \${SONAR_AUTH_TOKEN}: \
+                            '${SONAR_HOST}/api/measures/component?component=${APP_NAME}&metricKeys=coverage' \
+                            | jq -r '.component.measures[0].value'
+                        """,
+                        returnStdout: true
+                    ).trim().toFloat()
+                    
+                    if (coverage < COVERAGE_THRESHOLD.toFloat()) {
+                        error "Coverage ${coverage}% is below threshold ${COVERAGE_THRESHOLD}%"
+                    }
+                    
+                    env.CODE_COVERAGE = coverage.toString()
+                }
+            }
+        }
+        
+        stage('Snyk SCA Scan') {
+            steps {
+                container('snyk') {
+                    dir('app') {
+                        sh '''
+                            snyk test \
+                                --severity-threshold=high \
+                                --json-file-output=snyk-sca-results.json \
+                                || true
+                        '''
+                        script {
+                            def results = readJSON file: 'snyk-sca-results.json'
+                            def critical = results.vulnerabilities.findAll { 
+                                it.severity == 'critical' 
+                            }.size()
+                            
+                            env.CRITICAL_VULNS = critical.toString()
+                            
+                            if (critical > 0) {
+                                error "Found ${critical} critical vulnerabilities. Blocking build."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Build Container Image') {
+            steps {
+                container('docker') {
+                    dir('app') {
+                        sh '''
+                            docker build \
+                                -t ${ECR_REGISTRY}/${APP_NAME}:${IMAGE_TAG} \
+                                -t ${ECR_REGISTRY}/${APP_NAME}:latest \
+                                --label "git.commit=${GIT_COMMIT}" \
+                                --label "build.number=${BUILD_NUMBER}" \
+                                --label "build.url=${BUILD_URL}" \
+                                .
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Snyk Container Scan') {
+            steps {
+                container('snyk') {
+                    sh '''
+                        snyk container test \
+                            ${ECR_REGISTRY}/${APP_NAME}:${IMAGE_TAG} \
+                            --severity-threshold=high \
+                            --json-file-output=snyk-container-results.json \
+                            || true
+                    '''
+                    script {
+                        def results = readJSON file: 'snyk-container-results.json'
+                        def critical = results.vulnerabilities.findAll { 
+                            it.severity == 'critical' 
+                        }.size()
+                        
+                        if (critical > 0) {
+                            error "Container has ${critical} critical vulnerabilities"
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Generate SBOM') {
+            steps {
+                container('docker') {
+                    sh '''
+                        # Using Syft for SBOM generation
+                        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+                        
+                        syft ${ECR_REGISTRY}/${APP_NAME}:${IMAGE_TAG} \
+                            -o spdx-json \
+                            > sbom-${IMAGE_TAG}.json
+                    '''
+                    archiveArtifacts artifacts: 'sbom-*.json', fingerprint: true
+                }
+            }
+        }
+        
+        stage('AI Risk Scoring') {
+            steps {
+                container('python') {
+                    dir('ml-risk') {
+                        sh '''
+                            pip install --user -r requirements.txt
+                            
+                            python src/inference.py \
+                                --build-number ${BUILD_NUMBER} \
+                                --commit ${GIT_COMMIT} \
+                                --changed-files ${CHANGED_FILES} \
+                                --commit-message "${GIT_COMMIT_MSG}" \
+                                --coverage ${CODE_COVERAGE} \
+                                --critical-vulns ${CRITICAL_VULNS} \
+                                --output risk-score.json
+                        '''
+                        script {
+                            def riskReport = readJSON file: 'ml-risk/risk-score.json'
+                            env.RISK_SCORE = riskReport.risk_score.toString()
+                            env.RISK_LEVEL = riskReport.risk_level
+                            env.PREDICTED_FAILURE = riskReport.predicted_failure_reason
+                            
+                            echo """
+                            ╔════════════════════════════════════════╗
+                            ║       AI RISK ASSESSMENT REPORT        ║
+                            ╠════════════════════════════════════════╣
+                            ║ Risk Score: ${riskReport.risk_score}                    ║
+                            ║ Risk Level: ${riskReport.risk_level}                      ║
+                            ║ Prediction: ${riskReport.predicted_failure_reason}        ║
+                            ╚════════════════════════════════════════╝
+                            """
+                            
+                            if (riskReport.risk_score.toFloat() >= RISK_THRESHOLD.toFloat()) {
+                                input message: "High risk detected (${riskReport.risk_score}). Proceed?", 
+                                      ok: 'Deploy Anyway'
+                            }
+                        }
+                    }
+                    archiveArtifacts artifacts: 'ml-risk/risk-score.json', fingerprint: true
+                }
+            }
+        }
+        
+        stage('Security Gates Decision') {
+            steps {
+                script {
+                    securityGates.evaluate(
+                        coverage: env.CODE_COVERAGE,
+                        criticalVulns: env.CRITICAL_VULNS,
+                        riskScore: env.RISK_SCORE
+                    )
+                }
+            }
+        }
+        
+        stage('Push to ECR') {
+            steps {
+                container('docker') {
+                    sh '''
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                            docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                        
+                        docker push ${ECR_REGISTRY}/${APP_NAME}:${IMAGE_TAG}
+                        docker push ${ECR_REGISTRY}/${APP_NAME}:latest
+                    '''
+                }
+            }
+        }
+        
+        stage('Sign Image') {
+            steps {
+                container('kubectl') {
+                    sh '''
+                        # Install cosign
+                        curl -LO https://github.com/sigstore/cosign/releases/download/v2.2.0/cosign-linux-amd64
+                        chmod +x cosign-linux-amd64
+                        mv cosign-linux-amd64 /usr/local/bin/cosign
+                        
+                        # Sign image
+                        cosign sign --key k8s://jenkins/cosign-keys \
+                            ${ECR_REGISTRY}/${APP_NAME}:${IMAGE_TAG}
+                    '''
+                }
+            }
+        }
+        
+        stage('Update GitOps Repo') {
+            steps {
+                container('kubectl') {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'github-token',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )]) {
+                        sh '''
+                            git clone https://${GIT_TOKEN}@github.com/org/gitops-repo.git
+                            cd gitops-repo
+                            
+                            # Update image tag in values file
+                            sed -i "s|tag:.*|tag: ${IMAGE_TAG}|g" \
+                                helm-charts/sample-app/values-dev.yaml
+                            
+                            git config user.name "Jenkins CI"
+                            git config user.email "jenkins@example.com"
+                            git add .
+                            git commit -m "Update ${APP_NAME} to ${IMAGE_TAG} [skip ci]"
+                            git push origin main
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Trigger ArgoCD Sync') {
+            steps {
+                container('kubectl') {
+                    sh '''
+                        # Install ArgoCD CLI
+                        curl -sSL -o /usr/local/bin/argocd \
+                            https://github.com/argoproj/argo-cd/releases/download/v2.9.0/argocd-linux-amd64
+                        chmod +x /usr/local/bin/argocd
+                        
+                        # Login and sync
+                        argocd login ${ARGOCD_SERVER} \
+                            --username admin \
+                            --password ${ARGOCD_PASSWORD} \
+                            --grpc-web
+                        
+                        argocd app sync ${APP_NAME}-dev --prune
+                        argocd app wait ${APP_NAME}-dev --health
+                    '''
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                // Record metrics for MTTR calculation
+                def buildDuration = currentBuild.duration / 1000 / 60  // minutes
+                def buildResult = currentBuild.result ?: 'SUCCESS'
+                
+                sh """
+                    echo "${BUILD_NUMBER},${buildResult},${buildDuration},${RISK_SCORE},${CODE_COVERAGE},${CRITICAL_VULNS}" \
+                        >> /var/jenkins_home/metrics/pipeline-metrics.csv
+                """
+            }
+        }
+        success {
+            echo 'Pipeline completed successfully! ✅'
+        }
+        failure {
+            echo 'Pipeline failed! ❌'
+            // Trigger incident response
+            sh '''
+                curl -X POST ${SLACK_WEBHOOK} \
+                    -H 'Content-Type: application/json' \
+                    -d '{
+                        "text": "🚨 Pipeline Failed",
+                        "attachments": [{
+                            "color": "danger",
+                            "fields": [
+                                {"title": "Build", "value": "'${BUILD_NUMBER}'", "short": true},
+                                {"title": "Risk Score", "value": "'${RISK_SCORE}'", "short": true},
+                                {"title": "Reason", "value": "'${PREDICTED_FAILURE}'"}
+                            ]
+                        }]
+                    }'
+            '''
+        }
+    }
+}

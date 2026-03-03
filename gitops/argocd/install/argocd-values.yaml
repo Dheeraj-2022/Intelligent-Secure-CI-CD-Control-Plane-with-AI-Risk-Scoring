@@ -1,0 +1,52 @@
+global:
+  image:
+    tag: "v2.9.3"
+
+server:
+  service:
+    type: LoadBalancer
+  
+  config:
+    url: https://argocd.example.com
+    
+  rbacConfig:
+    policy.default: role:readonly
+    policy.csv: |
+      p, role:org-admin, applications, *, */*, allow
+      p, role:org-admin, clusters, get, *, allow
+      p, role:org-admin, repositories, *, *, allow
+      g, engineering, role:org-admin
+
+controller:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+repoServer:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+applicationSet:
+  enabled: true
+
+notifications:
+  enabled: true
+  argocdUrl: https://argocd.example.com
+
+configs:
+  secret:
+    createSecret: false  # Managed externally
+  
+  cm:
+    timeout.reconciliation: 180s
+    
+    resource.exclusions: |
+      - apiGroups:
+        - cilium.io
+        kinds:
+        - CiliumIdentity
+        clusters:
+        - "*"

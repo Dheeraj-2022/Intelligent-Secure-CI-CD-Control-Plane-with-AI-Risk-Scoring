@@ -1,0 +1,60 @@
+# =============================================================================
+# Kustomize overlay — prod
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: production
+
+commonLabels:
+  environment: production
+
+namePrefix: prod-
+
+# Patch: 3 replicas in production with zone anti-affinity
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+    target:
+      kind: Deployment
+      name: ".*"
+
+  # Production resource limits
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+    target:
+      kind: Deployment
+      name: ".*"
+
+  # Enforce readOnlyRootFilesystem in production
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/securityContext/readOnlyRootFilesystem
+        value: true
+    target:
+      kind: Deployment
+      name: ".*"
+
+images:
+  - name: sample-app
+    newTag: stable
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+
+resources:
+  - namespace.yaml
+  - hpa.yaml

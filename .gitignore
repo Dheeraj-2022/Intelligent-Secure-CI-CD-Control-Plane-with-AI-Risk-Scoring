@@ -1,0 +1,205 @@
+# ─────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.coveragerc
+nosetests.xml
+pytest.xml
+test-results/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+*.virtualenv
+
+# ─────────────────────────────────────────────
+# Jupyter / ML
+# ─────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+ml-risk/models/*.pkl
+ml-risk/models/*.joblib
+ml-risk/models/*.h5
+ml-risk/models/*.pt
+ml-risk/models/*.pth
+ml-risk/models/*.onnx
+ml-risk/data/*.csv
+!ml-risk/data/synthetic_dataset.csv
+
+# ─────────────────────────────────────────────
+# Terraform
+# ─────────────────────────────────────────────
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.tfplan
+*.tfplan.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+infra/terraform/terraform.tfvars
+infra/terraform/.terraformrc
+infra/terraform/terraform.rc
+
+# ─────────────────────────────────────────────
+# Docker
+# ─────────────────────────────────────────────
+.dockerignore
+*.tar
+docker-compose.override.yml
+.docker/
+
+# ─────────────────────────────────────────────
+# Helm / Kubernetes
+# ─────────────────────────────────────────────
+*.tgz
+gitops/helm-charts/**/charts/
+gitops/helm-charts/**/Chart.lock
+kubeconfig
+*.kubeconfig
+*.kube/
+
+# ─────────────────────────────────────────────
+# Jenkins
+# ─────────────────────────────────────────────
+ci/jenkins/workspace/
+*.hpi
+*.jpi
+
+# ─────────────────────────────────────────────
+# Security / Secrets
+# ─────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.pub
+!security/cosign/*.pub
+cosign.key
+cosign.pub
+.env
+.env.*
+!.env.example
+!.env.template
+secrets/
+*secret*
+*credential*
+*password*
+*.token
+
+# ─────────────────────────────────────────────
+# SBOM / Security scan artifacts
+# ─────────────────────────────────────────────
+sbom.json
+sbom.xml
+*.sbom
+*.sarif
+snyk-report.*
+trivy-report.*
+grype-report.*
+
+# ─────────────────────────────────────────────
+# Node / JavaScript (tooling)
+# ─────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn/
+package-lock.json
+yarn.lock
+
+# ─────────────────────────────────────────────
+# IDEs & editors
+# ─────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+.idea/
+*.iml
+*.iws
+*.ipr
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─────────────────────────────────────────────
+# OS
+# ─────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ─────────────────────────────────────────────
+# Logs & temp files
+# ─────────────────────────────────────────────
+*.log
+*.logs
+logs/
+tmp/
+temp/
+.temp/
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# ─────────────────────────────────────────────
+# CI artifacts
+# ─────────────────────────────────────────────
+.sonarqube/
+.scannerwork/
+reports/
+artifacts/

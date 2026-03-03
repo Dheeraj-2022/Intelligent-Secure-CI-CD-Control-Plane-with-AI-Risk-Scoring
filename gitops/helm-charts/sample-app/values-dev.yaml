@@ -1,0 +1,61 @@
+# =============================================================================
+# values-dev.yaml — Development environment overrides
+# Merges with values.yaml at deploy time (ArgoCD / Helm)
+# =============================================================================
+
+replicaCount: 1
+
+image:
+  # Tag is updated automatically by the Jenkins → GitOps pipeline step
+  tag: "latest"
+
+# Relaxed resource limits for dev to reduce cost
+resources:
+  limits:
+    cpu: 250m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Single replica is sufficient in dev — disable autoscaling
+autoscaling:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: sample-app.dev.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Verbose logging in dev
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+  environment: "dev"
+
+# Less strict probes — faster startup in dev
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 5

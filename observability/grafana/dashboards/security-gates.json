@@ -1,0 +1,41 @@
+{
+  "dashboard": {
+    "title": "Security Gates Dashboard",
+    "panels": [
+      {
+        "title": "Code Coverage Trend",
+        "targets": [
+          {
+            "expr": "sonarqube_coverage_percent{project=\"sample-app\"}"
+          }
+        ],
+        "type": "graph",
+        "thresholds": [
+          {"value": 80, "color": "green"}
+        ]
+      },
+      {
+        "title": "Critical Vulnerabilities",
+        "targets": [
+          {
+            "expr": "snyk_vulnerabilities_total{severity=\"critical\"}"
+          }
+        ],
+        "type": "stat",
+        "thresholds": [
+          {"value": 0, "color": "green"},
+          {"value": 1, "color": "red"}
+        ]
+      },
+      {
+        "title": "Gate Pass Rate",
+        "targets": [
+          {
+            "expr": "sum(rate(security_gates_passed_total[1h])) / sum(rate(security_gates_total[1h])) * 100"
+          }
+        ],
+        "type": "gauge"
+      }
+    ]
+  }
+}

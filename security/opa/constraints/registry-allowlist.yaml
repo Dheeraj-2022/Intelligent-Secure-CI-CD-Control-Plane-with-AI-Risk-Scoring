@@ -1,0 +1,17 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRegistryAllowlist
+metadata:
+  name: registry-allowlist
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces:
+      - "default"
+      - "production"
+  parameters:
+    registries:
+      - "123456789012.dkr.ecr.us-west-2.amazonaws.com/"
+      - "docker.io/library/"  # Official Docker images only
+  enforcementAction: deny

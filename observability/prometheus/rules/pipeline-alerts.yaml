@@ -1,0 +1,225 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pipeline-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  groups:
+    # ── Pipeline Health ──────────────────────────────────────────────────────
+    - name: pipeline.health
+      interval: 60s
+      rules:
+        - alert: PipelineSuccessRateLow
+          expr: |
+            (
+              sum(rate(jenkins_builds_success_total[30m]))
+              /
+              sum(rate(jenkins_builds_total[30m]))
+            ) * 100 < 80
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Pipeline success rate below 80%"
+            description: >
+              Jenkins pipeline success rate is {{ printf "%.1f" $value }}% over
+              the last 30 minutes. Threshold is 80%.
+
+        - alert: PipelineSuccessRateCritical
+          expr: |
+            (
+              sum(rate(jenkins_builds_success_total[30m]))
+              /
+              sum(rate(jenkins_builds_total[30m]))
+            ) * 100 < 60
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Pipeline success rate critically low (<60%)"
+            description: >
+              Jenkins pipeline success rate has dropped to
+              {{ printf "%.1f" $value }}% — immediate action required.
+
+        - alert: PipelineBuildDurationHigh
+          expr: |
+            histogram_quantile(0.95,
+              rate(jenkins_build_duration_seconds_bucket[15m])
+            ) > 1800
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "95th percentile build duration exceeds 30 min"
+            description: >
+              The p95 build duration is {{ printf "%.0f" $value }}s
+              ({{ printf "%.1f" (div $value 60) }} min).
+
+        - alert: PipelineQueueDepthHigh
+          expr: jenkins_queue_size_value > 10
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Jenkins build queue depth is high"
+            description: >
+              {{ $value }} builds are waiting in the Jenkins queue.
+              Consider adding more agent capacity.
+
+    # ── Security Gates ───────────────────────────────────────────────────────
+    - name: security.gates
+      interval: 60s
+      rules:
+        - alert: CriticalVulnerabilitiesDetected
+          expr: snyk_vulnerabilities_total{severity="critical"} > 0
+          for: 0m
+          labels:
+            severity: critical
+            team: security
+          annotations:
+            summary: "Critical vulnerabilities found in pipeline"
+            description: >
+              {{ $value }} critical CVE(s) detected by Snyk for
+              {{ $labels.project }}. Deployment must be blocked.
+
+        - alert: CodeCoverageBelowThreshold
+          expr: sonarqube_coverage_percent{project="sample-app"} < 80
+          for: 5m
+          labels:
+            severity: warning
+            team: engineering
+          annotations:
+            summary: "Code coverage below 80% threshold"
+            description: >
+              Current coverage for {{ $labels.project }} is
+              {{ printf "%.1f" $value }}%. Minimum acceptable is 80%.
+
+        - alert: SecurityGateFailureRateHigh
+          expr: |
+            (
+              sum(rate(security_gates_failed_total[1h]))
+              /
+              sum(rate(security_gates_total[1h]))
+            ) * 100 > 20
+          for: 15m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "Security gate failure rate exceeds 20%"
+            description: >
+              {{ printf "%.1f" $value }}% of builds are failing security gates
+              in the last hour. Review recent vulnerability reports.
+
+    # ── AI Risk Scoring ──────────────────────────────────────────────────────
+    - name: risk.scoring
+      interval: 60s
+      rules:
+        - alert: HighRiskDeploymentApproved
+          expr: |
+            sum(rate(pipeline_high_risk_deployments_approved_total[1h])) > 5
+          for: 0m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "High number of high-risk deployments approved in 1h"
+            description: >
+              {{ $value | printf "%.0f" }} high-risk deployments were manually
+              approved in the last hour. Review risk model accuracy.
+
+        - alert: RiskModelPredictionAccuracyLow
+          expr: |
+            (
+              sum(rate(risk_model_correct_predictions_total[24h]))
+              /
+              sum(rate(risk_model_predictions_total[24h]))
+            ) * 100 < 70
+          for: 30m
+          labels:
+            severity: warning
+            team: ml
+          annotations:
+            summary: "Risk model prediction accuracy below 70%"
+            description: >
+              The AI risk model accuracy is {{ printf "%.1f" $value }}% over
+              the last 24 hours. Model retraining may be required.
+
+    # ── Application SLOs ────────────────────────────────────────────────────
+    - name: app.slos
+      interval: 30s
+      rules:
+        - alert: AppHighErrorRate
+          expr: |
+            (
+              sum(rate(app_requests_total{status=~"5.."}[5m]))
+              /
+              sum(rate(app_requests_total[5m]))
+            ) * 100 > 5
+          for: 5m
+          labels:
+            severity: critical
+            team: engineering
+          annotations:
+            summary: "Application error rate exceeds 5%"
+            description: >
+              Error rate for {{ $labels.namespace }}/{{ $labels.pod }} is
+              {{ printf "%.1f" $value }}%. SLO breach imminent.
+
+        - alert: AppHighLatency
+          expr: |
+            histogram_quantile(0.99,
+              rate(app_request_duration_seconds_bucket[5m])
+            ) > 2.0
+          for: 5m
+          labels:
+            severity: warning
+            team: engineering
+          annotations:
+            summary: "Application p99 latency exceeds 2 seconds"
+            description: >
+              p99 latency for endpoint {{ $labels.endpoint }} is
+              {{ printf "%.2f" $value }}s.
+
+        - alert: AppPodRestarting
+          expr: |
+            rate(kube_pod_container_status_restarts_total{
+              namespace=~"default|production|dev"
+            }[15m]) * 60 * 15 > 3
+          for: 0m
+          labels:
+            severity: warning
+            team: engineering
+          annotations:
+            summary: "Pod is restarting frequently"
+            description: >
+              Pod {{ $labels.pod }} in namespace {{ $labels.namespace }}
+              has restarted {{ printf "%.0f" $value }} times in the last 15 min.
+
+    # ── MTTR Recording Rules ─────────────────────────────────────────────────
+    - name: mttr.recording
+      interval: 5m
+      rules:
+        - record: pipeline:success_rate:5m
+          expr: |
+            sum(rate(jenkins_builds_success_total[5m]))
+            /
+            sum(rate(jenkins_builds_total[5m]))
+
+        - record: pipeline:build_duration_p95:5m
+          expr: |
+            histogram_quantile(0.95,
+              rate(jenkins_build_duration_seconds_bucket[5m])
+            )
+
+        - record: security:gate_pass_rate:1h
+          expr: |
+            sum(rate(security_gates_passed_total[1h]))
+            /
+            sum(rate(security_gates_total[1h]))

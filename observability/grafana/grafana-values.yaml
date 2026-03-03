@@ -1,0 +1,165 @@
+# =============================================================================
+# Grafana Helm Values — standalone or via kube-prometheus-stack
+# Chart: grafana/grafana
+# =============================================================================
+
+replicas: 1
+
+image:
+  repository: grafana/grafana
+  tag: "10.2.3"
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    cpu:    "100m"
+    memory: "256Mi"
+  limits:
+    cpu:    "500m"
+    memory: "512Mi"
+
+# ─── Admin credentials ─────────────────────────────────────────────────────────
+adminUser: admin
+# adminPassword is loaded from a Kubernetes secret in production:
+# admin.existingSecret: grafana-credentials
+# admin.userKey: admin-user
+# admin.passwordKey: admin-password
+
+# ─── Persistence ──────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  storageClassName: gp3
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+
+# ─── Service ─────────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 80
+
+# ─── Ingress ──────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - grafana.example.com
+  tls:
+    - secretName: grafana-tls
+      hosts:
+        - grafana.example.com
+
+# ─── Grafana configuration ────────────────────────────────────────────────────
+grafana.ini:
+  server:
+    domain: grafana.example.com
+    root_url: "https://grafana.example.com/"
+    enable_gzip: true
+
+  security:
+    allow_embedding: true
+    cookie_secure: true
+    strict_transport_security: true
+
+  auth:
+    disable_login_form: false
+
+  auth.anonymous:
+    enabled: false
+
+  analytics:
+    reporting_enabled: false
+    check_for_updates: false
+
+  log:
+    mode: console
+    level: info
+
+  alerting:
+    enabled: true
+
+  unified_alerting:
+    enabled: true
+
+# ─── Data sources ─────────────────────────────────────────────────────────────
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+        access: proxy
+        isDefault: true
+        editable: true
+        jsonData:
+          timeInterval: "30s"
+          httpMethod: POST
+
+      - name: CloudWatch
+        type: cloudwatch
+        access: proxy
+        editable: true
+        jsonData:
+          authType: default
+          defaultRegion: us-west-2
+
+# ─── Dashboard providers ──────────────────────────────────────────────────────
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: cicd-dashboards
+        orgId: 1
+        folder: "CI/CD Control Plane"
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards/cicd
+
+# ─── Sidecar for auto-loading dashboards from ConfigMaps ──────────────────────
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    searchNamespace: ALL
+    provider:
+      foldersFromFilesStructure: true
+
+  datasources:
+    enabled: true
+    label: grafana_datasource
+    labelValue: "1"
+    searchNamespace: ALL
+
+# ─── Plugins ──────────────────────────────────────────────────────────────────
+plugins:
+  - grafana-piechart-panel
+  - grafana-worldmap-panel
+  - grafana-clock-panel
+  - vonage-status-panel
+  - natel-discrete-panel
+  - cloudwatch    # built-in, listed for clarity
+
+# ─── Notifications ────────────────────────────────────────────────────────────
+notifiers:
+  notifiers.yaml:
+    apiVersion: 1
+    notifiers:
+      - name: slack-cicd
+        type: slack
+        uid: slack1
+        org_id: 1
+        is_default: true
+        settings:
+          url: "${SLACK_WEBHOOK_URL}"
+          recipient: "#cicd-alerts"
+          mentionUsers: ""
+          mentionGroups: ""
+          mentionChannel: "channel"

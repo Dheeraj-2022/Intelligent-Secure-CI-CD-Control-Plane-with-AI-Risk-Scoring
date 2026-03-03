@@ -1,0 +1,88 @@
+{
+  "queries": [
+    {
+      "id": "pipeline-errors",
+      "name": "Pipeline Error Analysis",
+      "description": "Find all ERROR-level log events from Jenkins pipeline runs in the last 24 hours",
+      "logGroup": "/aws/eks/cicd-control-plane/jenkins",
+      "query": "fields @timestamp, @message, build_number, stage, @logStream\n| filter @message like /ERROR|Exception|FAILED/\n| sort @timestamp desc\n| limit 200"
+    },
+    {
+      "id": "security-gate-failures",
+      "name": "Security Gate Failure Events",
+      "description": "Identify which security gate (coverage, vulns, risk score) caused pipeline failures",
+      "logGroup": "/aws/eks/cicd-control-plane/jenkins",
+      "query": "fields @timestamp, build_number, gate_name, gate_value, threshold\n| filter event_type = 'SECURITY_GATE_FAILURE'\n| stats count(*) as failures by gate_name\n| sort failures desc"
+    },
+    {
+      "id": "high-risk-deployments",
+      "name": "High-Risk Deployment Approvals",
+      "description": "Audit trail of manually approved high-risk deployments",
+      "logGroup": "/aws/eks/cicd-control-plane/jenkins",
+      "query": "fields @timestamp, build_number, approver, risk_score, risk_level, commit_sha\n| filter event_type = 'HIGH_RISK_APPROVED'\n| sort @timestamp desc\n| limit 100"
+    },
+    {
+      "id": "app-errors",
+      "name": "Application Error Rate by Endpoint",
+      "description": "Identify endpoints with elevated 5xx error rates",
+      "logGroup": "/aws/eks/cicd-control-plane/application",
+      "query": "fields @timestamp, method, path, status_code, duration_ms, pod_name\n| filter status_code >= 500\n| stats count(*) as error_count, avg(duration_ms) as avg_latency_ms by path\n| sort error_count desc\n| limit 20"
+    },
+    {
+      "id": "slow-requests",
+      "name": "Slow Requests (p99 > 2s)",
+      "description": "Find requests with latency exceeding 2 seconds",
+      "logGroup": "/aws/eks/cicd-control-plane/application",
+      "query": "fields @timestamp, method, path, duration_ms, pod_name\n| filter duration_ms > 2000\n| stats count(*) as slow_count, pct(duration_ms, 99) as p99_ms, max(duration_ms) as max_ms by path\n| sort slow_count desc"
+    },
+    {
+      "id": "opa-violations",
+      "name": "OPA Gatekeeper Policy Violations",
+      "description": "Track admission webhook denials by constraint type",
+      "logGroup": "/aws/eks/cicd-control-plane/audit",
+      "query": "fields @timestamp, objectRef.namespace, objectRef.name, objectRef.resource, responseStatus.reason\n| filter verb in ['CREATE', 'UPDATE'] and responseStatus.code = 403\n| filter responseStatus.reason like /GatekeeperConstraint/\n| stats count(*) as violations by objectRef.resource, responseStatus.reason\n| sort violations desc"
+    },
+    {
+      "id": "snyk-critical-vulns",
+      "name": "Critical Vulnerability Detections Over Time",
+      "description": "Track critical CVE events across pipeline runs",
+      "logGroup": "/aws/eks/cicd-control-plane/jenkins",
+      "query": "fields @timestamp, build_number, package_name, cve_id, severity, fixed_version\n| filter event_type = 'SNYK_VULNERABILITY' and severity = 'critical'\n| sort @timestamp desc\n| limit 50"
+    },
+    {
+      "id": "argocd-sync-events",
+      "name": "ArgoCD Sync Events and Outcomes",
+      "description": "Monitor ArgoCD application sync success/failure patterns",
+      "logGroup": "/aws/eks/cicd-control-plane/argocd",
+      "query": "fields @timestamp, app_name, sync_status, health_status, image_tag, triggered_by\n| filter event_type = 'APP_SYNC'\n| sort @timestamp desc\n| stats count(*) as syncs, \n    sum(sync_status = 'Synced') as successful, \n    sum(sync_status = 'Failed') as failed\n  by app_name\n| limit 20"
+    },
+    {
+      "id": "eks-audit-privilege",
+      "name": "EKS Audit – Privileged Operations",
+      "description": "Detect privileged Kubernetes API calls for security monitoring",
+      "logGroup": "/aws/eks/cicd-control-plane/cluster",
+      "query": "fields @timestamp, user.username, verb, objectRef.resource, objectRef.name, objectRef.namespace, sourceIPs.0\n| filter verb in ['delete', 'patch', 'update'] \n  and objectRef.resource in ['secrets', 'configmaps', 'clusterrolebindings']\n| filter user.username not like /^system:/\n| sort @timestamp desc\n| limit 100"
+    },
+    {
+      "id": "build-duration-trend",
+      "name": "Pipeline Stage Duration Trend",
+      "description": "Track build stage durations to identify performance regressions",
+      "logGroup": "/aws/eks/cicd-control-plane/jenkins",
+      "query": "fields @timestamp, build_number, stage_name, duration_seconds\n| filter event_type = 'STAGE_COMPLETE'\n| stats avg(duration_seconds) as avg_secs,\n    pct(duration_seconds, 95) as p95_secs\n  by stage_name\n| sort p95_secs desc"
+    },
+    {
+      "id": "mttr-calculation",
+      "name": "Mean Time To Recovery (MTTR)",
+      "description": "Calculate MTTR from pipeline failure to next successful build",
+      "logGroup": "/aws/eks/cicd-control-plane/jenkins",
+      "query": "fields @timestamp, build_number, result, duration_minutes\n| filter event_type = 'BUILD_COMPLETE'\n| sort @timestamp asc\n| stats count(*) as total_builds,\n    sum(result = 'FAILURE') as failures,\n    avg(case when result = 'SUCCESS' then duration_minutes else 0 end) as avg_recovery_minutes\n  by bin(1h)"
+    },
+    {
+      "id": "cosign-verification-failures",
+      "name": "Image Signature Verification Failures",
+      "description": "Detect unsigned or tampered image admission attempts",
+      "logGroup": "/aws/eks/cicd-control-plane/audit",
+      "query": "fields @timestamp, image_ref, pod_name, namespace, reason\n| filter event_type = 'COSIGN_VERIFY_FAILED'\n| sort @timestamp desc\n| limit 50"
+    }
+  ]
+}
